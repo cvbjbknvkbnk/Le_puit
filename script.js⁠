@@ -1,0 +1,162 @@
+// --- ÉTAT DU JEU ET SAUVEGARDE ---
+let state = {
+    solde: 10000,
+    mise: 500,
+    enJeu: false,
+    multiplicateur: 1.00,
+    niveau: 0,
+    vitesse: 0.15
+};
+
+// Chargement de la sauvegarde
+const savedData = localStorage.getItem('puits_infini_save');
+if (savedData) {
+    try {
+        const parsed = JSON.parse(savedData);
+        if (parsed.solde !== undefined) state.solde = parsed.solde;
+    } catch(e) {}
+}
+
+function saveState() {
+    localStorage.setItem('puits_infini_save', JSON.stringify({ solde: state.solde }));
+}
+
+// --- ELEMENTS UI ---
+const uiSolde = document.getElementById('solde');
+const uiMult = document.getElementById('multiplicateur');
+const uiNiveau = document.getElementById('niveau');
+const inputMise = document.getElementById('mise');
+const btnPlay = document.getElementById('btn-play');
+const btnTake = document.getElementById('btn-take');
+const overlay = document.getElementById('overlay');
+const overlayTitle = document.getElementById('overlay-title');
+const overlayDesc = document.getElementById('overlay-desc');
+const btnRestart = document.getElementById('btn-restart');
+
+function updateUI() {
+    uiSolde.textContent = Math.floor(state.solde);
+    uiMult.textContent = state.multiplicateur.toFixed(2) + 'x';
+    uiNiveau.textContent = state.niveau;
+}
+updateUI();
+
+// --- MOTEUR 3D THREE.JS ---
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x05050a, 0.05);
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+container.appendChild(renderer.domElement);
+
+// Lumières
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(ambientLight);
+const dirLight = new THREE.DirectionalLight(0x38bdf8, 1);
+dirLight.position.set(0, 10, 5);
+scene.add(dirLight);
+
+// Tunnel / Puits
+const tunnelGroup = new THREE.Group();
+scene.add(tunnelGroup);
+
+const tunnelGeo = new THREE.CylinderGeometry(5, 5, 100, 16, 1, true);
+const tunnelMat = new THREE.MeshBasicMaterial({
+    color: 0x1e293b,
+    wireframe: true,
+    side: THREE.DoubleSide
+});
+const tunnel = new THREE.Mesh(tunnelGeo, tunnelMat);
+tunnel.rotation.x = Math.PI / 2;
+tunnelGroup.add(tunnel);
+
+// Joueur (Seau / Vaisseau)
+const playerGeo = new THREE.ConeGeometry(0.5, 1.5, 8);
+const playerMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.3 });
+const player = new THREE.Mesh(playerGeo, playerMat);
+player.rotation.x = -Math.PI / 2;
+player.position.set(0, -2, -5);
+scene.add(player);
+
+camera.position.set(0, 0, 0);
+
+// --- LOGIQUE DU JEU ---
+let crashNiveau = 0;
+
+btnPlay.addEventListener('click', () => {
+    const miseVal = parseInt(inputMise.value);
+    if (isNaN(miseVal) || miseVal <= 0 || miseVal > state.solde) return;
+
+    state.mise = miseVal;
+    state.solde -= state.mise;
+    state.multiplicateur = 1.00;
+    state.niveau = 0;
+    state.enJeu = true;
+    saveState();
+    updateUI();
+
+    // Détermination du crash
+    const rand = Math.random();
+    if (rand < 0.1) crashNiveau = 0;
+    else crashNiveau = Math.floor(Math.random() * 25) + 1;
+
+    btnPlay.classList.add('hidden');
+    btnTake.classList.remove('hidden');
+});
+
+btnTake.addEventListener('click', () => {
+    if (!state.enJeu) return;
+    
+    const gain = Math.floor(state.mise * state.multiplicateur);
+    state.solde += gain;
+    state.enJeu = false;
+    saveState();
+    updateUI();
+
+    overlayTitle.textContent = "CASH OUT !";
+    overlayTitle.style.color = "#22c55e";
+    overlayDesc.textContent = `Vous gagnez ${gain} 🪙 (${state.multiplicateur.toFixed(2)}x)`;
+    overlay.classList.remove('hidden');
+});
+
+btnRestart.addEventListener('click', () => {
+    overlay.classList.add('hidden');
+    btnTake.classList.add('hidden');
+    btnPlay.classList.remove('hidden');
+});
+
+// --- BOUCLE D'ANIMATION ---
+function animate() {
+    requestAnimationFrame(animate);
+
+    if (state.enJeu) {
+        tunnelGroup.position.z += state.vitesse;
+        if (tunnelGroup.position.z > 50) tunnelGroup.position.z = 0;
+
+        state.multiplicateur += 0.005;
+        state.niveau = Math.floor((state.multiplicateur - 1) * 5);
+
+        if (state.niveau >= crashNiveau) {
+            state.enJeu = false;
+            saveState();
+            updateUI();
+
+            overlayTitle.textContent = "BOOM !";
+            overlayTitle.style.color = "#ef4444";
+            overlayDesc.textContent = `Crashé au rempart ${state.niveau} !`;
+            overlay.classList.remove('hidden');
+        }
+        updateUI();
+    }
+
+    renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
